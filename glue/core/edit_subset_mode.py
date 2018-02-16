@@ -12,6 +12,7 @@ from __future__ import absolute_import, division, print_function
 import logging
 
 from glue.core.contracts import contract
+from glue.core.message import EditSubsetMessage
 from glue.core.data_collection import DataCollection
 from glue.core.data import Data
 from glue.core.decorators import singleton
@@ -20,13 +21,27 @@ from glue.utils import as_list
 
 @singleton
 class EditSubsetMode(object):
-
-    """ Implements how new SubsetStates modify the edit_subset state """
+    """
+    Implements how new SubsetStates modify the edit_subset state
+    """
 
     def __init__(self):
         self.mode = ReplaceMode
         self.data_collection = None
-        self.edit_subset = []
+        self._edit_subset = []
+
+    @property
+    def edit_subset(self):
+        return self._edit_subset
+
+    @edit_subset.setter
+    def edit_subset(self, value):
+        if value is None:
+            value = []
+        self._edit_subset = value
+        # Alert any listeners to the change in the active subset
+        if self.data_collection is not None:
+            self.data_collection.hub.broadcast(EditSubsetMessage(self, value))
 
     def _combine_data(self, new_state):
         """ Dispatches to the combine method of mode attribute.
@@ -38,12 +53,12 @@ class EditSubsetMode(object):
         :param edit_subset: The current edit_subset
         :param new_state: The new SubsetState
         """
-        if not self.edit_subset:
+        if not self._edit_subset or self.mode is NewMode:
             if self.data_collection is None:
                 raise RuntimeError("Must set data_collection before "
                                    "calling update")
-            self.edit_subset = self.data_collection.new_subset_group()
-        subs = self.edit_subset
+            self._edit_subset = self.data_collection.new_subset_group()
+        subs = self._edit_subset
         for s in as_list(subs):
             self.mode(s, new_state)
 
@@ -72,6 +87,12 @@ class EditSubsetMode(object):
         else:
             raise TypeError("input must be a Data or DataCollection: %s" %
                             type(d))
+
+
+def NewMode(edit_subset, new_state):
+    """ Replaces edit_subset.subset_state with new_state """
+    logging.getLogger(__name__).debug("New %s", edit_subset)
+    edit_subset.subset_state = new_state.copy()
 
 
 def ReplaceMode(edit_subset, new_state):
